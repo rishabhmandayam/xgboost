@@ -19,19 +19,48 @@ class XGBTreeVisualizer:
         self.y = y
         self.feature_names = feature_names
         self.target_names = target_names
-        self.trees_json = model.get_dump(dump_format='json')
-        self.num_trees = len(self.trees_json)
+        
+        # Check if model has the required methods
+        if not hasattr(model, 'get_dump'):
+            raise ValueError("Model does not have 'get_dump' method. Please provide a valid XGBoost model.")
+            
+        try:
+            self.trees_json = model.get_dump(dump_format='json')
+            self.num_trees = len(self.trees_json)
+        except Exception as e:
+            raise ValueError(f"Failed to get tree dump from model: {str(e)}. Please ensure you're using a valid XGBoost model.")
+            
         self.feature_ranges = {}
         self.feature_histograms = {}
         if X is not None:
+            # Convert X to numpy array if it's not already
+            X_array = self._ensure_numpy_array(X)
             # Compute min/max ranges and histograms for each feature
-            for i in range(X.shape[1]):
+            for i in range(X_array.shape[1]):
                 feature_key = f"f{i}"
-                self.feature_ranges[feature_key] = (np.min(X[:, i]), np.max(X[:, i]))
+                self.feature_ranges[feature_key] = (np.min(X_array[:, i]), np.max(X_array[:, i]))
                 # Compute a histogram with 20 bins for the feature distribution
-                counts, bins = np.histogram(X[:, i], bins=20)
+                counts, bins = np.histogram(X_array[:, i], bins=20)
                 self.feature_histograms[feature_key] = {"bins": bins, "counts": counts}
+        self.task_type = self._detect_task_type()
+        # Store number of classes for multiclass models
+        self.num_classes = self._get_num_classes()
 
+    def _ensure_numpy_array(self, X):
+        """
+        Convert input features to numpy array if they're not already.
+        Handles pandas DataFrames and other array-like objects.
+        """
+        if X is None:
+            return None
+            
+        # Check if it's a pandas DataFrame
+        if hasattr(X, 'values'):
+            return X.values
+            
+        # Convert to numpy array if it's not already
+        return np.array(X)
+    
     def parse_tree_json(self, json_str):
         """
         Parse a JSON string representing one tree into a dictionary.
@@ -45,7 +74,16 @@ class XGBTreeVisualizer:
         """
         if feature not in self.feature_ranges or feature not in self.feature_histograms:
             return ""
+            
+        # Skip if X was not provided or feature data is invalid
+        if not self.feature_ranges or not self.feature_histograms:
+            return ""
+            
         min_val, max_val = self.feature_ranges[feature]
+        # Skip if min and max are the same (no variation in feature)
+        if min_val == max_val:
+            return ""
+            
         try:
             threshold = float(split_condition)
             norm_threshold = (threshold - min_val) / (max_val - min_val) if max_val != min_val else 0.5
@@ -55,6 +93,10 @@ class XGBTreeVisualizer:
             counts = hist_data["counts"]
             num_bins = len(counts)
             
+            # Skip if histogram is empty or invalid
+            if num_bins == 0 or np.sum(counts) == 0:
+                return ""
+                
             # Define SVG dimensions
             svg_width = 100
             svg_height = 30  # Total height of the SVG
@@ -83,7 +125,8 @@ class XGBTreeVisualizer:
             )
             svg_parts.append("</svg>")
             return "".join(svg_parts)
-        except Exception:
+        except Exception as e:
+            # Silently fail and return empty string on error
             return ""
     
     def _tree_to_html(self, node):
@@ -94,20 +137,12 @@ class XGBTreeVisualizer:
         """
         if 'leaf' in node:
             leaf_value = node['leaf']
-            if self.target_names is not None:
-                try:
-                    target_index = int(round(leaf_value))
-                    target_label = self.target_names[target_index]
-                    display_val = f"{target_label} (raw: {leaf_value:.3f})"
-                except Exception:
-                    display_val = f"{leaf_value:.3f}"
-            else:
-                display_val = f"{leaf_value:.3f}"
+            display_val, tooltip = self._transform_leaf_value(leaf_value)
+            
             return (
                 f"<li class='node leaf'>"
-                f"<div class='node-content'>"
+                f"<div class='node-content' title='{tooltip}'>"
                 f"<span class='node-type'>Leaf</span>: {display_val} "
-                f"<span class='node-cover'>[cover: {node.get('cover', '')}]</span>"
                 f"</div></li>"
             )
         else:
@@ -143,7 +178,16 @@ class XGBTreeVisualizer:
         """
         Generate HTML for the tree selector dropdown.
         """
-        options = "".join([f'<option value="{i}">Tree {i}</option>' for i in range(self.num_trees)])
+        options = []
+        for i in range(self.num_trees):
+            if self.task_type == 'multiclass_classification':
+                class_idx, class_name, _ = self.get_tree_class(i)
+                class_info = f" ({class_name})" if class_name else ""
+                options.append(f'<option value="{i}">Tree {i}{class_info}</option>')
+            else:
+                options.append(f'<option value="{i}">Tree {i}</option>')
+                
+        options_html = "".join(options)
         selector_html = f"""
         <div id="tree-selector-container">
             <label for="tree-selector" style="font-weight: 600; color: #333;">Select Tree: </label>
@@ -151,8 +195,9 @@ class XGBTreeVisualizer:
                    min="0" max="{self.num_trees-1}" type="number"
                    onchange="changeTree(this.value)" onkeyup="if(event.key==='Enter')changeTree(this.value)">
             <datalist id="tree-options">
-                {options}
+                {options_html}
             </datalist>
+            <div id="tree-class-info" style="margin-top: 8px; font-weight: 500;"></div>
         </div>
         """
         return selector_html
@@ -166,8 +211,28 @@ class XGBTreeVisualizer:
             tree_json_str = self.trees_json[i]
             tree_dict = self.parse_tree_json(tree_json_str)
             tree_html = self._generate_tree_html(tree_dict)
+            
+            # Add class information header for multiclass
+            class_header = ""
+            if self.task_type == 'multiclass_classification':
+                class_idx, class_name, num_classes = self.get_tree_class(i)
+                if class_name:
+                    round_num = i // num_classes if num_classes > 0 else 0
+                    class_header = f"""
+                    <div class="tree-class-header">
+                        <h3>Tree {i}: Contributing to class "{class_name}" (Round {round_num})</h3>
+                        <p>This tree contributes to the score for class "{class_name}". 
+                           The final prediction is determined by summing contributions across all trees for each class.</p>
+                    </div>
+                    """
+            
             display_style = "block" if i == 0 else "none"
-            all_trees_html += f'<div id="tree-{i}" class="tree-container" style="display: {display_style};">{tree_html}</div>'
+            all_trees_html += f'''
+            <div id="tree-{i}" class="tree-container" style="display: {display_style};">
+                {class_header}
+                {tree_html}
+            </div>
+            '''
         return all_trees_html
     
     def show_tree(self, tree=0):
@@ -271,6 +336,22 @@ class XGBTreeVisualizer:
                 color: #000;
                 font-weight: 500;
             }}
+            .tree-class-header {{
+                background-color: #e3f2fd;
+                padding: 10px 15px;
+                margin-bottom: 15px;
+                border-radius: 5px;
+                border-left: 4px solid #2196f3;
+            }}
+            .tree-class-header h3 {{
+                margin: 0 0 8px 0;
+                color: #0d47a1;
+            }}
+            .tree-class-header p {{
+                margin: 0;
+                color: #555;
+                font-size: 14px;
+            }}
         </style>
         <div id="visualizer-container">
             {tree_selector}
@@ -327,8 +408,153 @@ class XGBTreeVisualizer:
                     initPanzoom(`tree-${{treeIndex}}`);
                     // Update the input value to match the selected tree
                     document.getElementById('tree-selector').value = treeIndex;
+                    
+                    // Update the dropdown to show the current selection
+                    const options = document.querySelectorAll('#tree-options option');
+                    if (options.length > treeIndex) {{
+                        const selectedOption = options[treeIndex];
+                        const treeClassInfo = document.getElementById('tree-class-info');
+                        if (treeClassInfo && selectedOption.textContent.includes('(')) {{
+                            treeClassInfo.textContent = selectedOption.textContent;
+                        }}
+                    }}
                 }}
             }}
         </script>
         """
         display(HTML(html_template))
+
+    def _get_num_classes(self):
+        """
+        Get the number of classes for multiclass classification models.
+        """
+        if self.task_type != 'multiclass_classification':
+            return 0
+            
+        # Try to get from model parameters
+        try:
+            params = self._get_model_params()
+            if 'num_class' in params:
+                return int(params['num_class'])
+        except:
+            pass
+            
+        # Try to infer from target_names
+        if self.target_names is not None:
+            return len(self.target_names)
+            
+        # Try to infer from number of trees
+        # In multiclass XGBoost, trees are grouped by class
+        # If we can't determine, default to 0
+        return 0
+        
+    def get_tree_class(self, tree_idx):
+        """
+        For multiclass models, determine which class a tree contributes to.
+        
+        Args:
+            tree_idx (int): Index of the tree
+            
+        Returns:
+            tuple: (class_index, class_name, num_classes)
+        """
+        if self.task_type != 'multiclass_classification' or self.num_classes <= 0:
+            return (0, None, 0)
+            
+        # In multiclass XGBoost, trees are grouped by class
+        # Tree i % num_classes corresponds to class i // num_classes
+        class_idx = tree_idx % self.num_classes
+        
+        # Get class name if available
+        class_name = None
+        if self.target_names is not None and class_idx < len(self.target_names):
+            class_name = self.target_names[class_idx]
+        else:
+            class_name = f"Class {class_idx}"
+            
+        return (class_idx, class_name, self.num_classes)
+
+    def _get_model_params(self):
+        """
+        Get parameters from the XGBoost model, handling different model types.
+        """
+        # Try different methods to get parameters based on model type
+        try:
+            # For sklearn wrapper
+            return self.model.get_xgb_params()
+        except:
+            try:
+                # For base XGBoost model
+                return self.model.get_params()
+            except:
+                try:
+                    # For base XGBoost model (alternative)
+                    return self.model.attributes()
+                except:
+                    # If all methods fail, return empty dict
+                    return {}
+
+    def _detect_task_type(self):
+        """
+        Detect if the XGBoost model is for regression, binary classification, or multiclass classification.
+        Assumes native XGBoost (xgb.Booster or similar).
+        
+        Returns:
+            str: 'regression', 'binary_classification', or 'multiclass_classification'
+        """
+        # Get parameters from native XGBoost model
+        try:
+            params = self._get_model_params()
+        except:
+            params = {}
+        
+        # Check objective parameter which specifies the learning task
+        objective = params.get('objective', '')
+        
+        # Determine task type based on objective
+        if any(obj in objective for obj in ['binary:logistic', 'binary:logitraw', 'binary:hinge']):
+            return 'binary_classification'
+        elif any(obj in objective for obj in ['multi:softmax', 'multi:softprob']):
+            return 'multiclass_classification'
+        elif any(obj in objective for obj in ['reg:linear', 'reg:squarederror', 'reg:logistic', 'reg:pseudohubererror',
+                                             'reg:squaredlogerror', 'reg:absoluteerror', 'reg:gamma', 'reg:tweedie']):
+            return 'regression'
+        
+        # If objective doesn't provide enough information, check num_class
+        if 'num_class' in params and int(params['num_class']) > 1:
+            return 'multiclass_classification'
+        
+        # If we have target_names, use that as a hint
+        if self.target_names is not None:
+            if len(self.target_names) > 2:
+                return 'multiclass_classification'
+            elif len(self.target_names) == 2:
+                return 'binary_classification'
+        
+        # Default to regression if we can't determine
+        return 'regression'
+
+    def _transform_leaf_value(self, leaf_value):
+        """
+        Transform raw leaf value based on the model's task type.
+        
+        Args:
+            leaf_value (float): The raw leaf value from the tree
+            
+        Returns:
+            tuple: (display_value, tooltip_text)
+        """
+        if self.task_type == 'binary_classification':
+            # For binary classification, raw values are log-odds
+            display_val = f"Contribution: {leaf_value:.4f}"
+            tooltip = "Partial contribution to log-odds score. Final prediction requires summing all tree contributions and applying sigmoid."
+            
+        elif self.task_type == 'multiclass_classification':
+            display_val = f"Contribution: {leaf_value:.4f}"
+            tooltip = "Partial contribution to class score. Final prediction requires summing all tree contributions and applying softmax."
+            
+        else:  # regression
+            display_val = f"{leaf_value:.4f}"
+            tooltip = "Partial contribution to prediction. Final value requires summing contributions from all trees."
+        
+        return display_val, tooltip
