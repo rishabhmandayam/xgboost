@@ -139,6 +139,10 @@ class XGBTreeVisualizer:
             node: The tree node to convert
             is_yes_branch: Whether this node is from a 'yes' branch (True), 'no' branch (False), or root (None)
         """
+        if node is None:
+            # Handle null node case
+            return "<li class='node leaf'><div class='node-content'>Empty Node</div></li>"
+        
         branch_indicator = ""
         branch_class = ""
         if is_yes_branch is not None:
@@ -148,7 +152,7 @@ class XGBTreeVisualizer:
             branch_indicator = f"<span class='branch-indicator {indicator_class}'>{branch_label}</span>"
             
         if 'leaf' in node:
-            leaf_value = node['leaf']
+            leaf_value = node.get('leaf', 'N/A')
             
             # Check if leaf_value is already a string (from simplified tree)
             if isinstance(leaf_value, str):
@@ -156,7 +160,11 @@ class XGBTreeVisualizer:
                 tooltip = "Prediction from simplified tree model."
             else:
                 # For numeric leaf values from XGBoost trees
-                display_val, tooltip = self._transform_leaf_value(leaf_value)
+                try:
+                    display_val, tooltip = self._transform_leaf_value(leaf_value)
+                except Exception as e:
+                    display_val = f"Error: {str(e)}"
+                    tooltip = "Error processing leaf value"
             
             return (
                 f"<li class='node leaf {branch_class}'>"
@@ -166,46 +174,56 @@ class XGBTreeVisualizer:
                 f"</div></li>"
             )
         else:
-            feature = node.get('split', 'unknown')
-            if self.feature_names:
-                try:
-                    idx = int(feature.replace("f", ""))
-                    feature_label = self.feature_names[idx] if idx < len(self.feature_names) else feature
-                except Exception:
+            try:
+                feature = node.get('split', 'unknown')
+                if self.feature_names:
+                    try:
+                        idx = int(feature.replace("f", ""))
+                        feature_label = self.feature_names[idx] if idx < len(self.feature_names) else feature
+                    except Exception:
+                        feature_label = feature
+                else:
                     feature_label = feature
-            else:
-                feature_label = feature
 
-            split_condition = node.get('split_condition', '')
-            svg_chart = self._generate_svg_for_node(feature, split_condition)
-            node_label = (
-                f"<div class='node-content'>"
-                f"{branch_indicator}"
-                f"<span class='node-type'>Split:</span> <span class='feature'>{feature_label}</span> "
-                f"&le; <span class='condition'>{split_condition}</span> {svg_chart} "
-                f"</div>"
-            )
-            
-            # Get the children, ensuring we have both yes and no branches
-            children = node.get('children', [])
-            yes_child = None
-            no_child = None
-            
-            # In XGBoost tree format, the first child is the 'yes' branch (≤ condition)
-            # and the second child is the 'no' branch (> condition)
-            if len(children) > 0:
-                yes_child = children[0]
-            if len(children) > 1:
-                no_child = children[1]
+                split_condition = node.get('split_condition', '')
+                svg_chart = self._generate_svg_for_node(feature, split_condition)
+                node_label = (
+                    f"<div class='node-content'>"
+                    f"{branch_indicator}"
+                    f"<span class='node-type'>Split:</span> <span class='feature'>{feature_label}</span> "
+                    f"&le; <span class='condition'>{split_condition}</span> {svg_chart} "
+                    f"</div>"
+                )
                 
-            # Generate HTML for children
-            children_html = ""
-            if yes_child:
-                children_html += self._tree_to_html(yes_child, True)
-            if no_child:
-                children_html += self._tree_to_html(no_child, False)
+                # Get the children, ensuring we have both yes and no branches
+                children = node.get('children', [])
+                yes_child = None
+                no_child = None
                 
-            return f"<li class='node internal {branch_class}'>{node_label}<ul>{children_html}</ul></li>"
+                # In XGBoost tree format, the first child is the 'yes' branch (≤ condition)
+                # and the second child is the 'no' branch (> condition)
+                if len(children) > 0:
+                    yes_child = children[0]
+                if len(children) > 1:
+                    no_child = children[1]
+                    
+                # Generate HTML for children
+                children_html = ""
+                if yes_child:
+                    children_html += self._tree_to_html(yes_child, True)
+                if no_child:
+                    children_html += self._tree_to_html(no_child, False)
+                    
+                return f"<li class='node internal {branch_class}'>{node_label}<ul>{children_html}</ul></li>"
+            except Exception as e:
+                # If we have an error generating the node, display it
+                error_html = (
+                    f"<li class='node error'>"
+                    f"<div class='node-content' style='background-color: #ffebee;'>"
+                    f"<span class='node-type' style='color: #d32f2f;'>Error:</span> {str(e)}"
+                    f"</div></li>"
+                )
+                return error_html
     
     def _generate_tree_html(self, tree_dict):
         """
@@ -226,35 +244,58 @@ class XGBTreeVisualizer:
         """
         all_trees_html = ""
         for i in range(self.num_trees):
-            tree_json_str = self.trees_json[i]
-            tree_dict = self.parse_tree_json(tree_json_str)
-            tree_html = self._generate_tree_html(tree_dict)
-            
-            # Add class information header for multiclass
-            class_header = ""
-            if self.task_type == 'multiclass_classification':
-                class_idx, class_name, num_classes = self.get_tree_class(i)
-                if class_name:
-                    round_num = i // num_classes if num_classes > 0 else 0
-                    class_header = templates.get_tree_class_header_html(i, class_name, round_num)
-            
-            # Add tree info for all tree types
-            tree_info = ""
-            if self.task_type == 'multiclass_classification':
-                if class_header:
-                    tree_info = class_header
+            try:
+                tree_json_str = self.trees_json[i]
+                tree_dict = self.parse_tree_json(tree_json_str)
+                tree_html = self._generate_tree_html(tree_dict)
+                
+                # Add class information header for multiclass
+                class_header = ""
+                if self.task_type == 'multiclass_classification':
+                    class_idx, class_name, num_classes = self.get_tree_class(i)
+                    if class_name:
+                        round_num = i // num_classes if num_classes > 0 else 0
+                        class_header = templates.get_tree_class_header_html(i, class_name, round_num)
+                
+                # Add tree info for all tree types
+                tree_info = ""
+                if self.task_type == 'multiclass_classification':
+                    if class_header:
+                        tree_info = class_header
+                    else:
+                        tree_info = templates.get_tree_info_html(i)
+                elif self.task_type == 'regression':
+                    # For regression, ensure we have a clear header for each tree
+                    tree_info = f"""<div class="tree-info"><h3>Regression Tree {i}</h3><p>This tree contributes directly to the predicted value. Final prediction is the sum of all tree outputs.</p></div>"""
                 else:
                     tree_info = templates.get_tree_info_html(i)
-            else:
-                tree_info = templates.get_tree_info_html(i)
-            
-            display_style = "block" if i == 0 else "none"
-            all_trees_html += f'''
-            <div id="tree-{i}" class="tree-container" style="display: {display_style};">
-                {tree_info}
-                {tree_html}
-            </div>
-            '''
+                
+                # Set display based on tree index
+                display_style = "block" if i == 0 else "none"
+                
+                # Create tree container with proper ID and class
+                all_trees_html += f'''
+                <div id="tree-{i}" class="tree-container" style="display: {display_style}; position: relative;">
+                    {tree_info}
+                    <div class="tree-content">
+                        {tree_html}
+                    </div>
+                </div>
+                '''
+            except Exception as e:
+                # Add error information to help diagnose issues
+                display_style = "block" if i == 0 else "none"
+                error_html = f'''
+                <div id="tree-{i}" class="tree-container" style="display: {display_style}; position: relative;">
+                    <div class="tree-info" style="background-color: #ffebee; border-left-color: #f44336;">
+                        <h3>Error Loading Tree {i}</h3>
+                        <p style="color: #d32f2f;">Failed to generate HTML for this tree: {str(e)}</p>
+                    </div>
+                </div>
+                '''
+                all_trees_html += error_html
+                print(f"Error generating tree {i}: {str(e)}")  # Output to console for debugging
+        
         return all_trees_html
     
     def show_tree(self, tree=0):

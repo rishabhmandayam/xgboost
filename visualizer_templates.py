@@ -43,11 +43,23 @@ TREE_CSS = """
         padding: 20px;
         cursor: grab;
         background: transparent; /* Make tree container background transparent */
+        width: 100%;
+        height: 100%;
+        position: absolute;
+        top: 0;
+        left: 0;
+        box-sizing: border-box;
+    }
+    .tree-content {
+        width: fit-content;
+        height: fit-content;
+        min-width: 100%;
+        min-height: 100%;
     }
     #trees-wrapper {
         flex: 1;
         position: relative;
-        overflow: visible; /* Allow content to extend beyond wrapper */
+        overflow: hidden; /* Contain the absolutely positioned trees */
         background: transparent; /* Make wrapper background transparent */
     }
     ul.tree {
@@ -177,18 +189,158 @@ TREE_JAVASCRIPT_TEMPLATE = """
     const numTrees = {num_trees};
     const maxTreeIndex = {max_tree_index};
     
-    // Initialize panzoom for the first tree
+    // Store panzoom instances to prevent reinitializing
+    const panzoomInstances = {{}};
+    
+    // Initialize panzoom for a specific tree container
     const initPanzoom = (treeId) => {{
         const elem = document.getElementById(treeId);
-        if (elem) {{
+        if (!elem) {{
+            console.error(`Element with ID ${{treeId}} not found`);
+            return null;
+        }}
+        
+        try {{
+            // Create panzoom instance for this tree
+            const pz = panzoom(elem, {{
+                zoomSpeed: 0.065,
+                maxZoom: 5,
+                minZoom: 0.3,
+                bounds: false,
+                boundsPadding: 0.1,
+                autocenter: false
+            }});
+            
+            // Update cursor on mouse events
+            elem.addEventListener('mousedown', () => {{
+                elem.style.cursor = 'grabbing';
+            }});
+            elem.addEventListener('mouseup', () => {{
+                elem.style.cursor = 'grab';
+            }});
+            
+            console.log(`Initialized panzoom for ${{treeId}}`);
+            return pz;
+        }} catch (e) {{
+            console.error(`Failed to initialize panzoom: ${{e.message}}`);
+            return null;
+        }}
+    }};
+    
+    // Function to change the displayed tree
+    function changeTree(treeIndex) {{
+        // Validate input
+        treeIndex = parseInt(treeIndex);
+        
+        if (isNaN(treeIndex) || treeIndex < 0 || treeIndex >= numTrees) {{
+            alert(`Please enter a valid tree number between 0 and ${{maxTreeIndex}}`);
+            return;
+        }}
+        
+        console.log(`Changing to tree ${{treeIndex}}`);
+        
+        // Hide all trees first
+        for (let i = 0; i < numTrees; i++) {{
+            const treeElem = document.getElementById(`tree-${{i}}`);
+            if (treeElem) {{
+                treeElem.style.display = 'none';
+                
+                // Destroy existing panzoom instance if it exists
+                if (panzoomInstances[`tree-${{i}}`]) {{
+                    try {{
+                        panzoomInstances[`tree-${{i}}`].dispose();
+                        delete panzoomInstances[`tree-${{i}}`];
+                        console.log(`Disposed panzoom for tree-${{i}}`);
+                    }} catch (e) {{
+                        console.warn(`Failed to dispose panzoom for tree-${{i}}: ${{e.message}}`);
+                    }}
+                }}
+            }}
+        }}
+        
+        // Show the selected tree
+        const selectedTree = document.getElementById(`tree-${{treeIndex}}`);
+        if (selectedTree) {{
+            // Make sure the tree is visible
+            selectedTree.style.display = 'block';
+            
+            // Update tree selector value
+            document.getElementById('tree-selector').value = treeIndex;
+            
+            // Update tree info display
+            updateTreeInfo(treeIndex, selectedTree);
+            
+            // Initialize panzoom after a small delay to ensure the tree is fully visible
+            setTimeout(() => {{
+                if (!panzoomInstances[`tree-${{treeIndex}}`]) {{
+                    panzoomInstances[`tree-${{treeIndex}}`] = initPanzoom(`tree-${{treeIndex}}`);
+                }}
+            }}, 50);
+        }} else {{
+            console.error(`Tree container for tree-${{treeIndex}} not found`);
+        }}
+    }}
+    
+    // Update the tree info display
+    function updateTreeInfo(treeIndex, treeElement) {{
+        const treeClassInfo = document.getElementById('tree-class-info');
+        if (treeClassInfo && treeElement) {{
+            // Get class info from the tree header
+            const treeHeader = treeElement.querySelector('.tree-class-header h3, .tree-info h3');
+            if (treeHeader) {{
+                treeClassInfo.textContent = treeHeader.textContent;
+            }} else {{
+                treeClassInfo.textContent = `Tree ${{treeIndex}}`;
+            }}
+        }}
+    }}
+    
+    // Initialize only first tree on page load
+    window.addEventListener('DOMContentLoaded', () => {{
+        // Initialize panzoom for the first tree after a short delay
+        setTimeout(() => {{
+            panzoomInstances['tree-0'] = initPanzoom('tree-0');
+        }}, 50);
+        
+        // Set up keyboard navigation
+        document.addEventListener('keydown', (event) => {{
+            // Only respond to arrow keys when not in an input field
+            if (document.activeElement.tagName !== 'INPUT') {{
+                const currentTree = parseInt(document.getElementById('tree-selector').value);
+                
+                // Left arrow key - previous tree
+                if (event.key === 'ArrowLeft') {{
+                    changeTree(Math.max(0, currentTree - 1));
+                }}
+                // Right arrow key - next tree
+                else if (event.key === 'ArrowRight') {{
+                    changeTree(Math.min(maxTreeIndex, currentTree + 1));
+                }}
+            }}
+        }});
+        
+        // Update initial tree info
+        const firstTree = document.getElementById('tree-0');
+        if (firstTree) {{
+            updateTreeInfo(0, firstTree);
+        }}
+    }});
+"""
+
+# JavaScript for simplified tree visualization (single tree)
+SIMPLIFIED_TREE_JAVASCRIPT = """
+    // Initialize panzoom for the simplified tree
+    const elem = document.getElementById('simplified-tree-wrapper');
+    if (elem) {{
+        try {{
             // Initialize panzoom with configuration for visible overflow
             panzoom(elem, {{
                 zoomSpeed: 0.065,
                 maxZoom: 5,
                 minZoom: 0.3,
-                bounds: false, // Remove bounds to allow panning beyond container
+                bounds: false,
                 boundsPadding: 0.1,
-                autocenter: false // Don't auto-center to allow free panning
+                autocenter: false
             }});
             
             // Update cursor on mouse events for smoother interaction
@@ -198,92 +350,14 @@ TREE_JAVASCRIPT_TEMPLATE = """
             elem.addEventListener('mouseup', () => {{
                 elem.style.cursor = 'grab';
             }});
-        }}
-    }};
-    
-    // Initialize panzoom for the first tree
-    initPanzoom('tree-0');
-    
-    // Function to change the displayed tree
-    function changeTree(treeIndex) {{
-        // Validate input
-        treeIndex = parseInt(treeIndex);
-        
-        if (isNaN(treeIndex) || treeIndex < 0 || treeIndex >= numTrees) {{
-            alert("Please enter a valid tree number between 0 and " + maxTreeIndex);
-            return;
-        }}
-        
-        // Hide all trees
-        const trees = document.querySelectorAll('.tree-container');
-        trees.forEach(tree => {{
-            tree.style.display = 'none';
-        }});
-        
-        // Show the selected tree
-        const selectedTree = document.getElementById(`tree-${{treeIndex}}`);
-        if (selectedTree) {{
-            selectedTree.style.display = 'block';
-            // Initialize panzoom for this tree if not already done
-            initPanzoom(`tree-${{treeIndex}}`);
-            // Update the input value to match the selected tree
-            document.getElementById('tree-selector').value = treeIndex;
             
-            // Update the tree class info if available
-            const treeClassInfo = document.getElementById('tree-class-info');
-            if (treeClassInfo) {{
-                // Get class info from the tree header if it exists
-                const treeHeader = selectedTree.querySelector('.tree-class-header h3, .tree-info h3');
-                if (treeHeader) {{
-                    treeClassInfo.textContent = treeHeader.textContent;
-                }} else {{
-                    treeClassInfo.textContent = `Tree ${{treeIndex}}`;
-                }}
-            }}
+            console.log('Simplified tree panzoom initialized successfully');
+        }} catch (e) {{
+            console.error(`Failed to initialize panzoom for simplified tree: ${{e.message}}`);
         }}
+    }} else {{
+        console.warn('Simplified tree element not found for panzoom initialization');
     }}
-    
-    // Add keyboard navigation with arrow keys
-    document.addEventListener('keydown', (event) => {{
-        // Only respond to arrow keys when not in an input field
-        if (document.activeElement.tagName !== 'INPUT') {{
-            const currentTree = parseInt(document.getElementById('tree-selector').value);
-            
-            // Left arrow key - previous tree
-            if (event.key === 'ArrowLeft') {{
-                changeTree(Math.max(0, currentTree - 1));
-            }}
-            // Right arrow key - next tree
-            else if (event.key === 'ArrowRight') {{
-                changeTree(Math.min(maxTreeIndex, currentTree + 1));
-            }}
-        }}
-    }});
-"""
-
-# JavaScript for simplified tree visualization (single tree)
-SIMPLIFIED_TREE_JAVASCRIPT = """
-    // Initialize panzoom for the simplified tree
-    const elem = document.getElementById('simplified-tree-wrapper');
-    if (elem) {
-        // Initialize panzoom with configuration for visible overflow
-        panzoom(elem, {
-            zoomSpeed: 0.065,
-            maxZoom: 5,
-            minZoom: 0.3,
-            bounds: false,
-            boundsPadding: 0.1,
-            autocenter: false
-        });
-        
-        // Update cursor on mouse events for smoother interaction
-        elem.addEventListener('mousedown', () => {
-            elem.style.cursor = 'grabbing';
-        });
-        elem.addEventListener('mouseup', () => {
-            elem.style.cursor = 'grab';
-        });
-    }
 """
 
 # Function to generate the main tree visualization HTML
@@ -417,6 +491,6 @@ def get_simplified_tree_header_html(max_depth):
     return f"""
     <div class="tree-info">
         <h3>Simplified Decision Tree (max_depth={max_depth})</h3>
-        <p>This is a simplified decision tree fitted to match the XGBoost model's predictions.</p>
+        <p style="color: #000000; font-weight: 500;">This is a simplified decision tree fitted to match the XGBoost model's predictions.</p>
     </div>
     """ 
