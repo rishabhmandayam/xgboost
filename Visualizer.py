@@ -1,6 +1,10 @@
 import json
 import numpy as np
 from IPython.display import display, HTML
+# Add sklearn imports
+from sklearn.tree import DecisionTreeClassifier, DecisionTreeRegressor, _tree
+# Import HTML templates
+import visualizer_templates as templates
 
 class XGBTreeVisualizer:
     def __init__(self, model, X, y, feature_names=None, target_names=None):
@@ -20,7 +24,6 @@ class XGBTreeVisualizer:
         self.feature_names = feature_names
         self.target_names = target_names
         
-        # Check if model has the required methods
         if not hasattr(model, 'get_dump'):
             raise ValueError("Model does not have 'get_dump' method. Please provide a valid XGBoost model.")
             
@@ -29,21 +32,18 @@ class XGBTreeVisualizer:
             self.num_trees = len(self.trees_json)
         except Exception as e:
             raise ValueError(f"Failed to get tree dump from model: {str(e)}. Please ensure you're using a valid XGBoost model.")
-            
+        
+        #Create Histograms
         self.feature_ranges = {}
         self.feature_histograms = {}
         if X is not None:
-            # Convert X to numpy array if it's not already
             X_array = self._ensure_numpy_array(X)
-            # Compute min/max ranges and histograms for each feature
             for i in range(X_array.shape[1]):
                 feature_key = f"f{i}"
                 self.feature_ranges[feature_key] = (np.min(X_array[:, i]), np.max(X_array[:, i]))
-                # Compute a histogram with 20 bins for the feature distribution
                 counts, bins = np.histogram(X_array[:, i], bins=20)
                 self.feature_histograms[feature_key] = {"bins": bins, "counts": counts}
         self.task_type = self._detect_task_type()
-        # Store number of classes for multiclass models
         self.num_classes = self._get_num_classes()
 
     def _ensure_numpy_array(self, X):
@@ -129,19 +129,39 @@ class XGBTreeVisualizer:
             # Silently fail and return empty string on error
             return ""
     
-    def _tree_to_html(self, node):
+    def _tree_to_html(self, node, is_yes_branch=None):
         """
         Recursively convert a tree node (in dict form) into HTML.
         Internal nodes display the feature split and mini histogram.
         Leaf nodes display the leaf value.
+        
+        Args:
+            node: The tree node to convert
+            is_yes_branch: Whether this node is from a 'yes' branch (True), 'no' branch (False), or root (None)
         """
+        branch_indicator = ""
+        branch_class = ""
+        if is_yes_branch is not None:
+            branch_class = "yes-branch-node" if is_yes_branch else "no-branch-node"
+            branch_label = "Yes (≤)" if is_yes_branch else "No (>)"
+            indicator_class = "yes-indicator" if is_yes_branch else "no-indicator"
+            branch_indicator = f"<span class='branch-indicator {indicator_class}'>{branch_label}</span>"
+            
         if 'leaf' in node:
             leaf_value = node['leaf']
-            display_val, tooltip = self._transform_leaf_value(leaf_value)
+            
+            # Check if leaf_value is already a string (from simplified tree)
+            if isinstance(leaf_value, str):
+                display_val = leaf_value
+                tooltip = "Prediction from simplified tree model."
+            else:
+                # For numeric leaf values from XGBoost trees
+                display_val, tooltip = self._transform_leaf_value(leaf_value)
             
             return (
-                f"<li class='node leaf'>"
+                f"<li class='node leaf {branch_class}'>"
                 f"<div class='node-content' title='{tooltip}'>"
+                f"{branch_indicator}"
                 f"<span class='node-type'>Leaf</span>: {display_val} "
                 f"</div></li>"
             )
@@ -160,12 +180,32 @@ class XGBTreeVisualizer:
             svg_chart = self._generate_svg_for_node(feature, split_condition)
             node_label = (
                 f"<div class='node-content'>"
+                f"{branch_indicator}"
                 f"<span class='node-type'>Split:</span> <span class='feature'>{feature_label}</span> "
                 f"&le; <span class='condition'>{split_condition}</span> {svg_chart} "
                 f"</div>"
             )
-            children_html = "".join(self._tree_to_html(child) for child in node.get('children', []))
-            return f"<li class='node internal'>{node_label}<ul>{children_html}</ul></li>"
+            
+            # Get the children, ensuring we have both yes and no branches
+            children = node.get('children', [])
+            yes_child = None
+            no_child = None
+            
+            # In XGBoost tree format, the first child is the 'yes' branch (≤ condition)
+            # and the second child is the 'no' branch (> condition)
+            if len(children) > 0:
+                yes_child = children[0]
+            if len(children) > 1:
+                no_child = children[1]
+                
+            # Generate HTML for children
+            children_html = ""
+            if yes_child:
+                children_html += self._tree_to_html(yes_child, True)
+            if no_child:
+                children_html += self._tree_to_html(no_child, False)
+                
+            return f"<li class='node internal {branch_class}'>{node_label}<ul>{children_html}</ul></li>"
     
     def _generate_tree_html(self, tree_dict):
         """
@@ -176,31 +216,9 @@ class XGBTreeVisualizer:
     
     def _generate_tree_selector(self):
         """
-        Generate HTML for the tree selector dropdown.
+        Generate HTML for the tree selector input field.
         """
-        options = []
-        for i in range(self.num_trees):
-            if self.task_type == 'multiclass_classification':
-                class_idx, class_name, _ = self.get_tree_class(i)
-                class_info = f" ({class_name})" if class_name else ""
-                options.append(f'<option value="{i}">Tree {i}{class_info}</option>')
-            else:
-                options.append(f'<option value="{i}">Tree {i}</option>')
-                
-        options_html = "".join(options)
-        selector_html = f"""
-        <div id="tree-selector-container">
-            <label for="tree-selector" style="font-weight: 600; color: #333;">Select Tree: </label>
-            <input list="tree-options" id="tree-selector" placeholder="Enter tree number..." 
-                   min="0" max="{self.num_trees-1}" type="number"
-                   onchange="changeTree(this.value)" onkeyup="if(event.key==='Enter')changeTree(this.value)">
-            <datalist id="tree-options">
-                {options_html}
-            </datalist>
-            <div id="tree-class-info" style="margin-top: 8px; font-weight: 500;"></div>
-        </div>
-        """
-        return selector_html
+        return templates.get_tree_selector_html(self.num_trees)
     
     def _generate_all_trees_html(self):
         """
@@ -218,18 +236,22 @@ class XGBTreeVisualizer:
                 class_idx, class_name, num_classes = self.get_tree_class(i)
                 if class_name:
                     round_num = i // num_classes if num_classes > 0 else 0
-                    class_header = f"""
-                    <div class="tree-class-header">
-                        <h3>Tree {i}: Contributing to class "{class_name}" (Round {round_num})</h3>
-                        <p>This tree contributes to the score for class "{class_name}". 
-                           The final prediction is determined by summing contributions across all trees for each class.</p>
-                    </div>
-                    """
+                    class_header = templates.get_tree_class_header_html(i, class_name, round_num)
+            
+            # Add tree info for all tree types
+            tree_info = ""
+            if self.task_type == 'multiclass_classification':
+                if class_header:
+                    tree_info = class_header
+                else:
+                    tree_info = templates.get_tree_info_html(i)
+            else:
+                tree_info = templates.get_tree_info_html(i)
             
             display_style = "block" if i == 0 else "none"
             all_trees_html += f'''
             <div id="tree-{i}" class="tree-container" style="display: {display_style};">
-                {class_header}
+                {tree_info}
                 {tree_html}
             </div>
             '''
@@ -245,183 +267,13 @@ class XGBTreeVisualizer:
         
         tree_selector = self._generate_tree_selector()
         all_trees_html = self._generate_all_trees_html()
+
+        # Store variables that will be used in JavaScript
+        num_trees = self.num_trees
+        max_tree_index = self.num_trees - 1
         
-        # Build an HTML fragment without full document wrappers,
-        # so that the notebook's own background is not overwritten.
-        html_template = f"""
-        <style>
-            /* Container styling for the tree */
-            #visualizer-container {{
-                width: 100%;
-                height: 650px;
-                display: flex;
-                flex-direction: column;
-                border: 1px solid #ddd;
-                background: #fff;
-                box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-                border-radius: 5px;
-            }}
-            #tree-selector-container {{
-                padding: 15px;
-                text-align: center;
-                border-bottom: 1px solid #eee;
-                background: #f8f9fa;
-                border-radius: 5px 5px 0 0;
-            }}
-            #tree-selector {{
-                padding: 8px 12px;
-                border-radius: 4px;
-                border: 1px solid #ccc;
-                background: #fff;
-                font-size: 14px;
-                cursor: pointer;
-                min-width: 150px;
-                color: #333;
-                font-weight: 500;
-            }}
-            .tree-container {{
-                flex: 1;
-                overflow: auto;
-                padding: 20px;
-                cursor: grab;
-            }}
-            ul.tree {{
-                list-style-type: none;
-                margin: 0;
-                padding-left: 20px;
-                position: relative;
-            }}
-            ul.tree ul {{
-                margin-left: 20px;
-                border-left: 1px dashed #ccc;
-                padding-left: 15px;
-            }}
-            li.node {{
-                margin: 10px 0;
-                position: relative;
-            }}
-            .node-content {{
-                background: #d0d0d0;
-                padding: 8px 12px;
-                border-radius: 4px;
-                box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-                display: inline-block;
-                color: #000;
-                font-weight: 500;
-            }}
-            .node-type {{
-                font-weight: bold;
-                color: #005a9c;
-            }}
-            .feature {{
-                font-weight: bold;
-                color: #000;
-            }}
-            .condition {{
-                color: #b71c1c;
-                font-weight: 600;
-            }}
-            .node-stats {{
-                font-size: 12px;
-                color: #222;
-                margin-top: 4px;
-                font-weight: 500;
-            }}
-            .node-cover {{
-                color: #222;
-                font-weight: 500;
-            }}
-            li.leaf .node-content {{
-                background: #e8f5e9;
-                color: #000;
-                font-weight: 500;
-            }}
-            .tree-class-header {{
-                background-color: #e3f2fd;
-                padding: 10px 15px;
-                margin-bottom: 15px;
-                border-radius: 5px;
-                border-left: 4px solid #2196f3;
-            }}
-            .tree-class-header h3 {{
-                margin: 0 0 8px 0;
-                color: #0d47a1;
-            }}
-            .tree-class-header p {{
-                margin: 0;
-                color: #555;
-                font-size: 14px;
-            }}
-        </style>
-        <div id="visualizer-container">
-            {tree_selector}
-            <div id="trees-wrapper">
-                {all_trees_html}
-            </div>
-        </div>
-        <script src="https://unpkg.com/@panzoom/panzoom/dist/panzoom.min.js"></script>
-        <script>
-            // Initialize panzoom for the first tree
-            const initPanzoom = (treeId) => {{
-                const elem = document.getElementById(treeId);
-                if (elem) {{
-                    panzoom(elem, {{
-                        zoomSpeed: 0.065,
-                        maxZoom: 5,
-                        minZoom: 0.3,
-                        bounds: true,
-                        boundsPadding: 0.1
-                    }});
-                    // Update cursor on mouse events for smoother interaction.
-                    elem.addEventListener('mousedown', () => {{
-                        elem.style.cursor = 'grabbing';
-                    }});
-                    elem.addEventListener('mouseup', () => {{
-                        elem.style.cursor = 'grab';
-                    }});
-                }}
-            }};
-            
-            // Initialize panzoom for the first tree
-            initPanzoom('tree-0');
-            
-            // Function to change the displayed tree
-            function changeTree(treeIndex) {{
-                // Validate input
-                treeIndex = parseInt(treeIndex);
-                if (isNaN(treeIndex) || treeIndex < 0 || treeIndex >= {self.num_trees}) {{
-                    alert(`Please enter a valid tree number between 0 and {self.num_trees-1}`);
-                    return;
-                }}
-                
-                // Hide all trees
-                const trees = document.querySelectorAll('.tree-container');
-                trees.forEach(tree => {{
-                    tree.style.display = 'none';
-                }});
-                
-                // Show the selected tree
-                const selectedTree = document.getElementById(`tree-${{treeIndex}}`);
-                if (selectedTree) {{
-                    selectedTree.style.display = 'block';
-                    // Initialize panzoom for this tree if not already done
-                    initPanzoom(`tree-${{treeIndex}}`);
-                    // Update the input value to match the selected tree
-                    document.getElementById('tree-selector').value = treeIndex;
-                    
-                    // Update the dropdown to show the current selection
-                    const options = document.querySelectorAll('#tree-options option');
-                    if (options.length > treeIndex) {{
-                        const selectedOption = options[treeIndex];
-                        const treeClassInfo = document.getElementById('tree-class-info');
-                        if (treeClassInfo && selectedOption.textContent.includes('(')) {{
-                            treeClassInfo.textContent = selectedOption.textContent;
-                        }}
-                    }}
-                }}
-            }}
-        </script>
-        """
+        # Use template from visualizer_templates.py
+        html_template = templates.get_tree_html_template(tree_selector, all_trees_html, num_trees, max_tree_index)
         display(HTML(html_template))
 
     def _get_num_classes(self):
@@ -558,3 +410,162 @@ class XGBTreeVisualizer:
             tooltip = "Partial contribution to prediction. Final value requires summing contributions from all trees."
         
         return display_val, tooltip
+
+    def show_simplified_tree(self, max_depth=3):
+        """
+        Fit a simplified sklearn decision tree to the XGBoost model's predictions,
+        then visualize it using the same format as the XGBoost trees.
+        
+        Parameters:
+            max_depth (int): Maximum depth of the simplified tree (default: 3)
+        """
+        if self.X is None or not isinstance(self.X, (np.ndarray, list)) or len(self.X) == 0:
+            raise ValueError("Input data X is required to fit a simplified tree")
+        
+        X_array = self._ensure_numpy_array(self.X)
+        
+        # Get XGBoost model predictions
+        try:
+            is_sklearn_api = False
+            
+            if hasattr(self.model, 'predict') and not hasattr(self.model, 'get_booster'):
+                try:
+                    # Try sklearn API first with proper error handling
+                    y_pred = self.model.predict(self.X)
+                    is_sklearn_api = True
+                except (TypeError, ValueError):
+                    # If it fails, we'll try native XGBoost approach below
+                    pass
+                    
+            if not is_sklearn_api:
+                # Try to import XGBoost for native API
+                try:
+                    import xgboost as xgb
+                
+                    if hasattr(self.model, 'get_booster'):
+                        xgb_model = self.model.get_booster()
+                    else:
+                        xgb_model = self.model
+                        
+                    dmatrix = xgb.DMatrix(X_array, missing=np.nan)
+                    
+                    y_pred = xgb_model.predict(dmatrix)
+                    
+                except ImportError:
+                    raise ValueError("XGBoost not found. Please install it to use this feature.")
+                except Exception as e:
+                    raise ValueError(f"Failed to get predictions from XGBoost model: {str(e)}")
+        except Exception as e:
+            raise ValueError(f"Failed to get predictions from XGBoost model: {str(e)}")
+        
+        # Choose the appropriate sklearn tree model based on task type
+        if self.task_type == 'regression':
+            simplified_model = DecisionTreeRegressor(max_depth=max_depth)
+            simplified_model.fit(X_array, y_pred)
+        elif self.task_type == 'binary_classification':
+            simplified_model = DecisionTreeClassifier(max_depth=max_depth)
+            # For binary classification, y_pred might be probabilities
+            if len(y_pred.shape) > 1 and y_pred.shape[1] > 1:
+                # If we have probability outputs, use the probability of class 1
+                simplified_model.fit(X_array, y_pred[:, 1] > 0.5)
+            else:
+                simplified_model.fit(X_array, y_pred)
+        else:  # multiclass_classification
+            simplified_model = DecisionTreeClassifier(max_depth=max_depth)
+            # For multiclass, y_pred might be probabilities or class indices
+            if len(y_pred.shape) > 1 and y_pred.shape[1] > 1:
+                # If we have probability outputs, use the class with highest probability
+                simplified_model.fit(X_array, np.argmax(y_pred, axis=1))
+            else:
+                simplified_model.fit(X_array, y_pred)
+        
+        # Convert the sklearn tree to our visualization format
+        tree_dict = self._sklearn_tree_to_dict(simplified_model)
+        
+        # Generate HTML for the simplified tree
+        tree_html = self._generate_tree_html(tree_dict)
+        
+        # Create a header for the simplified tree
+        tree_header = templates.get_simplified_tree_header_html(max_depth)
+        
+        # Use template from visualizer_templates.py
+        html_template = templates.get_simplified_tree_html_template(tree_header, tree_html)
+        display(HTML(html_template))
+    
+    def _sklearn_tree_to_dict(self, sklearn_tree):
+        """
+        Convert a scikit-learn decision tree to a dictionary format
+        compatible with our tree visualization.
+        
+        Parameters:
+            sklearn_tree: A trained sklearn.tree.DecisionTreeClassifier or DecisionTreeRegressor
+            
+        Returns:
+            dict: Tree structure in a format compatible with our visualization
+        """
+        tree = sklearn_tree.tree_
+        
+        # Function to recursively build the tree
+        def build_tree(node_id):
+            if tree.children_left[node_id] == _tree.TREE_LEAF:
+                # Leaf node
+                if hasattr(sklearn_tree, 'classes_'):
+                    # For classification trees, show predicted class
+                    # Get the majority class
+                    value = tree.value[node_id][0]
+                    class_idx = np.argmax(value)
+                    
+                    # Try to get class name from target_names if available
+                    if self.target_names is not None and class_idx < len(self.target_names):
+                        class_name = self.target_names[class_idx]
+                    # Fallback to sklearn's class labels if available
+                    elif hasattr(sklearn_tree, 'classes_') and class_idx < len(sklearn_tree.classes_):
+                        # If the class is numeric, try to map it to target_names by position
+                        if np.issubdtype(type(sklearn_tree.classes_[class_idx]), np.number) and self.target_names:
+                            actual_class = int(sklearn_tree.classes_[class_idx])
+                            if actual_class < len(self.target_names):
+                                class_name = self.target_names[actual_class]
+                            else:
+                                class_name = f"Class {sklearn_tree.classes_[class_idx]}"
+                        else:
+                            class_name = f"{sklearn_tree.classes_[class_idx]}"
+                    else:
+                        class_name = f"Class {class_idx}"
+                    
+                    # Calculate probability or confidence
+                    total = np.sum(value)
+                    prob = value[class_idx] / total if total > 0 else 0
+                    
+                    # Format leaf value as class name with probability
+                    leaf_value = f"{class_name} ({prob:.3f})"
+                else:
+                    # For regression trees, show predicted value
+                    leaf_value = float(tree.value[node_id][0][0])
+                
+                return {'leaf': leaf_value}
+            else:
+                # Decision node
+                feature_idx = tree.feature[node_id]
+                threshold = tree.threshold[node_id]
+                
+                # Get feature name if available
+                if self.feature_names and feature_idx < len(self.feature_names):
+                    feature_label = self.feature_names[feature_idx]
+                    feature = f"f{feature_idx}"
+                else:
+                    feature = f"f{feature_idx}"
+                    feature_label = f"feature_{feature_idx}"
+                
+                # Create the node dictionary
+                node = {
+                    'split': feature,
+                    'split_condition': float(threshold),
+                    'children': [
+                        build_tree(tree.children_left[node_id]),   # Yes branch
+                        build_tree(tree.children_right[node_id])   # No branch
+                    ]
+                }
+                return node
+        
+        # Start building the tree from the root (node 0)
+        return build_tree(0)

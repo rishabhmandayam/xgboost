@@ -1,0 +1,422 @@
+"""
+HTML templates and styles for XGBTreeVisualizer.
+
+This module contains all the HTML, CSS, and JavaScript code used by XGBTreeVisualizer
+to render interactive tree visualizations.
+"""
+
+# CSS Styles for the tree visualization
+TREE_CSS = """
+    /* Container styling for the tree */
+    #visualizer-container {
+        width: 100%;
+        height: 650px;
+        display: flex;
+        flex-direction: column;
+        border: 0px solid #ddd;
+        background: transparent; /* Make container background transparent */
+        box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        border-radius: 0px;
+        overflow: visible; /* Allow content to extend beyond container */
+    }
+    #tree-selector-container {
+        padding: 15px;
+        text-align: center;
+        border-bottom: 1px solid #eee;
+        background: #f8f9fa;
+        border-radius: 5px 5px 0 0;
+        z-index: 10;
+    }
+    #tree-selector {
+        padding: 8px 12px;
+        border-radius: 4px;
+        border: 1px solid #ccc;
+        background: #fff;
+        font-size: 14px;
+        cursor: pointer;
+        color: #333;
+        font-weight: 500;
+    }
+    .tree-container {
+        flex: 1;
+        overflow: visible; /* Allow tree to extend beyond container */
+        padding: 20px;
+        cursor: grab;
+        background: transparent; /* Make tree container background transparent */
+    }
+    #trees-wrapper {
+        flex: 1;
+        position: relative;
+        overflow: visible; /* Allow content to extend beyond wrapper */
+        background: transparent; /* Make wrapper background transparent */
+    }
+    ul.tree {
+        list-style-type: none;
+        margin: 0;
+        padding-left: 20px;
+        position: relative;
+        background: transparent; /* Make tree background transparent */
+    }
+    ul.tree ul {
+        margin-left: 20px;
+        border-left: 1px dashed #ccc;
+        padding-left: 15px;
+        position: relative;
+    }
+    /* Add visual indicators for yes/no branches */
+    ul.tree ul:before {
+        content: '';
+        position: absolute;
+        top: -10px;
+        left: -15px;
+        width: 15px;
+        height: 20px;
+        border-bottom: 1px dashed #ccc;
+    }
+    li.node {
+        margin: 10px 0;
+        position: relative;
+    }
+    /* Branch styling */
+    li.yes-branch-node > ul {
+        border-left-color: rgba(76, 175, 80, 0.7);
+        border-left-style: solid;
+        border-left-width: 2px;
+    }
+    li.no-branch-node > ul {
+        border-left-color: rgba(244, 67, 54, 0.7);
+        border-left-style: solid;
+        border-left-width: 2px;
+    }
+    .node-content {
+        background: #d0d0d0;
+        padding: 8px 12px;
+        border-radius: 4px;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        display: inline-block;
+        color: #000;
+        font-weight: 500;
+        position: relative;
+    }
+    .node-type {
+        font-weight: bold;
+        color: #005a9c;
+    }
+    .feature {
+        font-weight: bold;
+        color: #000;
+    }
+    .condition {
+        color: #b71c1c;
+        font-weight: 600;
+    }
+    .branch-indicator {
+        display: inline-block;
+        padding: 3px 6px;
+        margin-right: 8px;
+        border-radius: 3px;
+        font-size: 12px;
+        font-weight: bold;
+        vertical-align: middle;
+    }
+    /* Always use consistent colors for yes/no indicators regardless of parent node */
+    .yes-indicator {
+        background-color: #4caf50;
+        color: white;
+    }
+    .no-indicator {
+        background-color: #f44336;
+        color: white;
+    }
+    /* Add left border to nodes based on branch type */
+    li.yes-branch-node > .node-content {
+        border-left: 4px solid #4caf50;
+    }
+    li.no-branch-node > .node-content {
+        border-left: 4px solid #f44336;
+    }
+    .node-stats {
+        font-size: 12px;
+        color: #222;
+        margin-top: 4px;
+        font-weight: 500;
+    }
+    .node-cover {
+        color: #222;
+        font-weight: 500;
+    }
+    li.leaf .node-content {
+        background: #e8f5e9;
+        color: #000;
+        font-weight: 500;
+    }
+    .tree-class-header, .tree-info {
+        background-color: #e3f2fd;
+        padding: 10px 15px;
+        margin-bottom: 15px;
+        border-radius: 5px;
+        border-left: 4px solid #2196f3;
+    }
+    .tree-class-header h3, .tree-info h3 {
+        margin: 0 0 8px 0;
+        color: #0d47a1;
+    }
+    .tree-class-header p {
+        margin: 0;
+        color: #555;
+        font-size: 14px;
+    }
+"""
+
+# CSS for simplified tree, identical to main tree CSS to ensure consistent styling
+SIMPLIFIED_TREE_CSS = TREE_CSS
+
+# JavaScript for tree visualization with panzoom functionality
+TREE_JAVASCRIPT_TEMPLATE = """
+    // Store tree count as a variable
+    const numTrees = {num_trees};
+    const maxTreeIndex = {max_tree_index};
+    
+    // Initialize panzoom for the first tree
+    const initPanzoom = (treeId) => {{
+        const elem = document.getElementById(treeId);
+        if (elem) {{
+            // Initialize panzoom with configuration for visible overflow
+            panzoom(elem, {{
+                zoomSpeed: 0.065,
+                maxZoom: 5,
+                minZoom: 0.3,
+                bounds: false, // Remove bounds to allow panning beyond container
+                boundsPadding: 0.1,
+                autocenter: false // Don't auto-center to allow free panning
+            }});
+            
+            // Update cursor on mouse events for smoother interaction
+            elem.addEventListener('mousedown', () => {{
+                elem.style.cursor = 'grabbing';
+            }});
+            elem.addEventListener('mouseup', () => {{
+                elem.style.cursor = 'grab';
+            }});
+        }}
+    }};
+    
+    // Initialize panzoom for the first tree
+    initPanzoom('tree-0');
+    
+    // Function to change the displayed tree
+    function changeTree(treeIndex) {{
+        // Validate input
+        treeIndex = parseInt(treeIndex);
+        
+        if (isNaN(treeIndex) || treeIndex < 0 || treeIndex >= numTrees) {{
+            alert("Please enter a valid tree number between 0 and " + maxTreeIndex);
+            return;
+        }}
+        
+        // Hide all trees
+        const trees = document.querySelectorAll('.tree-container');
+        trees.forEach(tree => {{
+            tree.style.display = 'none';
+        }});
+        
+        // Show the selected tree
+        const selectedTree = document.getElementById(`tree-${{treeIndex}}`);
+        if (selectedTree) {{
+            selectedTree.style.display = 'block';
+            // Initialize panzoom for this tree if not already done
+            initPanzoom(`tree-${{treeIndex}}`);
+            // Update the input value to match the selected tree
+            document.getElementById('tree-selector').value = treeIndex;
+            
+            // Update the tree class info if available
+            const treeClassInfo = document.getElementById('tree-class-info');
+            if (treeClassInfo) {{
+                // Get class info from the tree header if it exists
+                const treeHeader = selectedTree.querySelector('.tree-class-header h3, .tree-info h3');
+                if (treeHeader) {{
+                    treeClassInfo.textContent = treeHeader.textContent;
+                }} else {{
+                    treeClassInfo.textContent = `Tree ${{treeIndex}}`;
+                }}
+            }}
+        }}
+    }}
+    
+    // Add keyboard navigation with arrow keys
+    document.addEventListener('keydown', (event) => {{
+        // Only respond to arrow keys when not in an input field
+        if (document.activeElement.tagName !== 'INPUT') {{
+            const currentTree = parseInt(document.getElementById('tree-selector').value);
+            
+            // Left arrow key - previous tree
+            if (event.key === 'ArrowLeft') {{
+                changeTree(Math.max(0, currentTree - 1));
+            }}
+            // Right arrow key - next tree
+            else if (event.key === 'ArrowRight') {{
+                changeTree(Math.min(maxTreeIndex, currentTree + 1));
+            }}
+        }}
+    }});
+"""
+
+# JavaScript for simplified tree visualization (single tree)
+SIMPLIFIED_TREE_JAVASCRIPT = """
+    // Initialize panzoom for the simplified tree
+    const elem = document.getElementById('simplified-tree-wrapper');
+    if (elem) {
+        // Initialize panzoom with configuration for visible overflow
+        panzoom(elem, {
+            zoomSpeed: 0.065,
+            maxZoom: 5,
+            minZoom: 0.3,
+            bounds: false,
+            boundsPadding: 0.1,
+            autocenter: false
+        });
+        
+        // Update cursor on mouse events for smoother interaction
+        elem.addEventListener('mousedown', () => {
+            elem.style.cursor = 'grabbing';
+        });
+        elem.addEventListener('mouseup', () => {
+            elem.style.cursor = 'grab';
+        });
+    }
+"""
+
+# Function to generate the main tree visualization HTML
+def get_tree_html_template(tree_selector, all_trees_html, num_trees, max_tree_index):
+    """
+    Generate the HTML template for the main tree visualization.
+    
+    Args:
+        tree_selector (str): HTML for the tree selector UI
+        all_trees_html (str): HTML containing all tree structures
+        num_trees (int): Total number of trees
+        max_tree_index (int): Maximum tree index
+        
+    Returns:
+        str: Complete HTML template
+    """
+    # Format the JavaScript with the tree counts
+    tree_javascript = TREE_JAVASCRIPT_TEMPLATE.format(
+        num_trees=num_trees,
+        max_tree_index=max_tree_index
+    )
+    
+    return f"""
+    <style>
+    {TREE_CSS}
+    </style>
+    <div id="visualizer-container">
+        {tree_selector}
+        <div id="trees-wrapper">
+            {all_trees_html}
+        </div>
+    </div>
+    <script src="https://unpkg.com/@panzoom/panzoom/dist/panzoom.min.js"></script>
+    <script>
+    {tree_javascript}
+    </script>
+    """
+
+# Function to generate the simplified tree visualization HTML
+def get_simplified_tree_html_template(tree_header, tree_html):
+    """
+    Generate the HTML template for the simplified tree visualization.
+    
+    Args:
+        tree_header (str): HTML header for the simplified tree
+        tree_html (str): HTML containing the simplified tree structure
+        
+    Returns:
+        str: Complete HTML template
+    """
+    return f"""
+    <style>
+    {SIMPLIFIED_TREE_CSS}
+    </style>
+    <div id="simplified-tree-container">
+        {tree_header}
+        <div id="simplified-tree-wrapper">
+            {tree_html}
+        </div>
+    </div>
+    <script src="https://unpkg.com/@panzoom/panzoom/dist/panzoom.min.js"></script>
+    <script>
+    {SIMPLIFIED_TREE_JAVASCRIPT}
+    </script>
+    """
+
+# HTML templates for different components
+
+def get_tree_selector_html(num_trees):
+    """
+    Generate HTML for the tree selector component.
+    
+    Args:
+        num_trees (int): Total number of trees
+        
+    Returns:
+        str: HTML for tree selector
+    """
+    return f"""
+    <div id="tree-selector-container">
+        <label for="tree-selector" style="font-weight: 600; color: #333;">Select Tree: </label>
+        <input id="tree-selector" type="number" min="0" max="{num_trees-1}" value="0" 
+               style="width: 80px; padding: 8px 12px; border-radius: 4px; border: 1px solid #ccc;"
+               onchange="changeTree(this.value)" onkeyup="if(event.key==='Enter')changeTree(this.value)">
+        <div id="tree-class-info" style="margin-top: 8px; font-weight: 500;"></div>
+    </div>
+    """
+
+def get_tree_class_header_html(i, class_name, round_num):
+    """
+    Generate HTML for a tree class header for multiclass models.
+    
+    Args:
+        i (int): Tree index
+        class_name (str): Class name
+        round_num (int): Round number
+        
+    Returns:
+        str: HTML for tree class header
+    """
+    return f"""
+    <div class="tree-class-header">
+        <h3>Tree {i}: Contributing to class "{class_name}" (Round {round_num})</h3>
+        <p>This tree contributes to the score for class "{class_name}". 
+           The final prediction is determined by summing contributions across all trees for each class.</p>
+    </div>
+    """
+
+def get_tree_info_html(i):
+    """
+    Generate HTML for basic tree info header.
+    
+    Args:
+        i (int): Tree index
+        
+    Returns:
+        str: HTML for tree info
+    """
+    return f"""<div class="tree-info"><h3>Tree {i}</h3></div>"""
+
+def get_simplified_tree_header_html(max_depth):
+    """
+    Generate HTML header for simplified tree.
+    
+    Args:
+        max_depth (int): Maximum depth of the simplified tree
+        
+    Returns:
+        str: HTML for simplified tree header
+    """
+    return f"""
+    <div class="tree-info">
+        <h3>Simplified Decision Tree (max_depth={max_depth})</h3>
+        <p>This is a simplified decision tree fitted to match the XGBoost model's predictions.</p>
+    </div>
+    """ 
