@@ -59,7 +59,7 @@ TREE_CSS = """
     #trees-wrapper {
         flex: 1;
         position: relative;
-        overflow: hidden; /* Contain the absolutely positioned trees */
+        overflow: visible /* Contain the absolutely positioned trees */
         background: transparent; /* Make wrapper background transparent */
     }
     ul.tree {
@@ -260,12 +260,17 @@ TREE_JAVASCRIPT_TEMPLATE = """
         
         // Show the selected tree
         const selectedTree = document.getElementById(`tree-${{treeIndex}}`);
+        console.log("REAAAACHED")
+        console.log(selectedTree)
         if (selectedTree) {{
             // Make sure the tree is visible
             selectedTree.style.display = 'block';
             
             // Update tree selector value
-            document.getElementById('tree-selector').value = treeIndex;
+            const treeSelector = document.getElementById('tree-selector');
+            if (treeSelector && treeSelector.value != treeIndex) {{
+                treeSelector.value = treeIndex;
+            }}
             
             // Update tree info display
             updateTreeInfo(treeIndex, selectedTree);
@@ -324,6 +329,23 @@ TREE_JAVASCRIPT_TEMPLATE = """
         if (firstTree) {{
             updateTreeInfo(0, firstTree);
         }}
+        
+        // Set up event handler for the number input
+        const treeSelector = document.getElementById('tree-selector');
+        if (treeSelector) {{
+            treeSelector.addEventListener('change', function() {{
+                changeTree(this.value);
+            }});
+            
+            // Also handle input event for real-time response
+            treeSelector.addEventListener('input', function() {{
+                // Only change tree if the value is valid
+                const value = parseInt(this.value);
+                if (!isNaN(value) && value >= 0 && value <= maxTreeIndex) {{
+                    changeTree(value);
+                }}
+            }});
+        }}
     }});
 """
 
@@ -361,7 +383,7 @@ SIMPLIFIED_TREE_JAVASCRIPT = """
 """
 
 # Function to generate the main tree visualization HTML
-def get_tree_html_template(tree_selector, all_trees_html, num_trees, max_tree_index):
+def get_tree_html_template(tree_selector, all_trees_html, num_trees, max_tree_index, instance_id):
     """
     Generate the HTML template for the main tree visualization.
     
@@ -370,6 +392,7 @@ def get_tree_html_template(tree_selector, all_trees_html, num_trees, max_tree_in
         all_trees_html (str): HTML containing all tree structures
         num_trees (int): Total number of trees
         max_tree_index (int): Maximum tree index
+        instance_id (str): Unique identifier for the visualizer instance
         
     Returns:
         str: Complete HTML template
@@ -384,7 +407,7 @@ def get_tree_html_template(tree_selector, all_trees_html, num_trees, max_tree_in
     <style>
     {TREE_CSS}
     </style>
-    <div id="visualizer-container">
+    <div id="{instance_id}_container" class="xgb-tree-visualizer">
         {tree_selector}
         <div id="trees-wrapper">
             {all_trees_html}
@@ -392,7 +415,53 @@ def get_tree_html_template(tree_selector, all_trees_html, num_trees, max_tree_in
     </div>
     <script src="https://unpkg.com/@panzoom/panzoom/dist/panzoom.min.js"></script>
     <script>
-    {tree_javascript}
+    (function() {{
+        // Using an IIFE to create a closure and prevent global namespace pollution
+        const instance = "{instance_id}";
+        
+        // Get elements specific to this instance
+        const treeSelector = document.getElementById(instance + "_tree-selector");
+        
+        // Function to show a specific tree
+        function showTree(treeIndex) {{
+            // Validate the tree index
+            treeIndex = parseInt(treeIndex);
+            if (isNaN(treeIndex) || treeIndex < 0 || treeIndex >= {num_trees}) {{
+                console.error("Invalid tree index:", treeIndex);
+                return;
+            }}
+            
+            // Hide all trees
+            for (let i = 0; i <= {max_tree_index}; i++) {{
+                const treeElement = document.getElementById(instance + "_tree-" + i);
+                if (treeElement) {{
+                    treeElement.style.display = "none";
+                }}
+            }}
+            
+            // Show the selected tree
+            const selectedTree = document.getElementById(instance + "_tree-" + treeIndex);
+            if (selectedTree) {{
+                selectedTree.style.display = "block";
+            }}
+        }}
+        
+        // Add event listeners to tree selector
+        if (treeSelector) {{
+            // Handle change event (when user presses enter or field loses focus)
+            treeSelector.addEventListener("change", function() {{
+                showTree(this.value);
+            }});
+            
+            // Handle input event for real-time response when typing or using up/down buttons
+            treeSelector.addEventListener("input", function() {{
+                const value = parseInt(this.value);
+                if (!isNaN(value) && value >= 0 && value < {num_trees}) {{
+                    showTree(value);
+                }}
+            }});
+        }}
+    }})();
     </script>
     """
 
@@ -426,23 +495,21 @@ def get_simplified_tree_html_template(tree_header, tree_html):
 
 # HTML templates for different components
 
-def get_tree_selector_html(num_trees):
+def get_tree_selector_html(num_trees, instance_id):
     """
     Generate HTML for the tree selector component.
     
     Args:
         num_trees (int): Total number of trees
+        instance_id (str): Unique identifier for the visualizer instance
         
     Returns:
         str: HTML for tree selector
     """
     return f"""
-    <div id="tree-selector-container">
-        <label for="tree-selector" style="font-weight: 600; color: #333;">Select Tree: </label>
-        <input id="tree-selector" type="number" min="0" max="{num_trees-1}" value="0" 
-               style="width: 80px; padding: 8px 12px; border-radius: 4px; border: 1px solid #ccc;"
-               onchange="changeTree(this.value)" onkeyup="if(event.key==='Enter')changeTree(this.value)">
-        <div id="tree-class-info" style="margin-top: 8px; font-weight: 500;"></div>
+    <div class="tree-controls">
+        <label for="{instance_id}_tree-selector">Select Tree: </label>
+        <input type="number" id="{instance_id}_tree-selector" class="tree-selector" min="0" max="{num_trees-1}" value="0" style="width: 80px; padding: 8px 12px; border-radius: 4px; border: 1px solid #ccc; font-size: 14px;">
     </div>
     """
 
@@ -461,7 +528,7 @@ def get_tree_class_header_html(i, class_name, round_num):
     return f"""
     <div class="tree-class-header">
         <h3>Tree {i}: Contributing to class "{class_name}" (Round {round_num})</h3>
-        <p>This tree contributes to the score for class "{class_name}". 
+        <p style="color: #333333; font-weight: 500;">This tree contributes to the score for class "{class_name}". 
            The final prediction is determined by summing contributions across all trees for each class.</p>
     </div>
     """
@@ -476,21 +543,37 @@ def get_tree_info_html(i):
     Returns:
         str: HTML for tree info
     """
-    return f"""<div class="tree-info"><h3>Tree {i}</h3></div>"""
+    return f"""<div class="tree-class-header"><h3>Tree {i}</h3><p style="color: #333333; font-weight: 500;">This tree contributes directly to the predicted value. Final prediction is the sum of all tree outputs.</p></div>"""
 
-def get_simplified_tree_header_html(max_depth):
+def get_simplified_tree_header_html(max_depth, n_components=None, n_samples=None):
     """
     Generate HTML header for simplified tree.
     
     Args:
         max_depth (int): Maximum depth of the simplified tree
+        n_components (int, optional): Number of GMM components used, if GMM sampling was performed
+        n_samples (int, optional): Number of samples used, if GMM sampling was performed
         
     Returns:
         str: HTML for simplified tree header
     """
-    return f"""
-    <div class="tree-info">
-        <h3>Simplified Decision Tree (max_depth={max_depth})</h3>
-        <p style="color: #000000; font-weight: 500;">This is a simplified decision tree fitted to match the XGBoost model's predictions.</p>
-    </div>
-    """ 
+    if n_components is not None and n_samples is not None:
+        # If GMM sampling was used
+        return f"""
+        <div class="tree-class-header">
+            <h3>Simplified Decision Tree (max_depth={max_depth})</h3>
+            <p style="color: #333333; font-weight: 500;">This is a simplified decision tree fitted to match the XGBoost model's predictions.</p>
+            <p style="color: #333333; font-weight: 500;">
+                Created using Gaussian Mixture Model (GMM) sampling with {n_components} components
+                and {n_samples:,} synthetic samples.
+            </p>
+        </div>
+        """
+    else:
+        # Original version (no GMM information)
+        return f"""
+        <div class="tree-class-header">
+            <h3>Simplified Decision Tree (max_depth={max_depth})</h3>
+            <p style="color: #333333; font-weight: 500;">This is a simplified decision tree fitted to match the XGBoost model's predictions.</p>
+        </div>
+        """ 

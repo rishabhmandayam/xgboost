@@ -7,6 +7,8 @@ from sklearn.tree import DecisionTreeClassifier, DecisionTreeRegressor, _tree
 import visualizer_templates as templates
 
 class XGBTreeVisualizer:
+    _instance_counter = 0  # Class variable to track instances
+    
     def __init__(self, model, X, y, feature_names=None, target_names=None):
         """
         Initialize the visualizer.
@@ -18,6 +20,10 @@ class XGBTreeVisualizer:
             feature_names : List of feature names. If provided, will be used to label splits.
             target_names  : List of target names (for classification).
         """
+        # Assign a unique ID to this instance
+        XGBTreeVisualizer._instance_counter += 1
+        self.instance_id = f"xgb_viz_{XGBTreeVisualizer._instance_counter}"
+        
         self.model = model
         self.X = X
         self.y = y
@@ -236,7 +242,7 @@ class XGBTreeVisualizer:
         """
         Generate HTML for the tree selector input field.
         """
-        return templates.get_tree_selector_html(self.num_trees)
+        return templates.get_tree_selector_html(self.num_trees, self.instance_id)
     
     def _generate_all_trees_html(self):
         """
@@ -246,8 +252,12 @@ class XGBTreeVisualizer:
         for i in range(self.num_trees):
             try:
                 tree_json_str = self.trees_json[i]
+                #print(i)
+                #print(tree_json_str)
                 tree_dict = self.parse_tree_json(tree_json_str)
                 tree_html = self._generate_tree_html(tree_dict)
+
+                #print(tree_html)
                 
                 # Add class information header for multiclass
                 class_header = ""
@@ -266,16 +276,17 @@ class XGBTreeVisualizer:
                         tree_info = templates.get_tree_info_html(i)
                 elif self.task_type == 'regression':
                     # For regression, ensure we have a clear header for each tree
-                    tree_info = f"""<div class="tree-info"><h3>Regression Tree {i}</h3><p>This tree contributes directly to the predicted value. Final prediction is the sum of all tree outputs.</p></div>"""
+                    tree_info = f"""<div class="tree-class-header"><h3>Regression Tree {i}</h3><p style="color: #333333; font-weight: 500;">This tree contributes directly to the predicted value. Final prediction is the sum of all tree outputs.</p></div>"""
                 else:
                     tree_info = templates.get_tree_info_html(i)
                 
                 # Set display based on tree index
                 display_style = "block" if i == 0 else "none"
+
                 
-                # Create tree container with proper ID and class
+                # Create tree container with proper ID and class that includes the instance ID
                 all_trees_html += f'''
-                <div id="tree-{i}" class="tree-container" style="display: {display_style}; position: relative;">
+                <div id="{self.instance_id}_tree-{i}" class="tree-container" style="display: {display_style}; position: relative;">
                     {tree_info}
                     <div class="tree-content">
                         {tree_html}
@@ -283,10 +294,10 @@ class XGBTreeVisualizer:
                 </div>
                 '''
             except Exception as e:
-                # Add error information to help diagnose issues
+                # Add error information with instance-specific ID
                 display_style = "block" if i == 0 else "none"
                 error_html = f'''
-                <div id="tree-{i}" class="tree-container" style="display: {display_style}; position: relative;">
+                <div id="{self.instance_id}_tree-{i}" class="tree-container" style="display: {display_style}; position: relative;">
                     <div class="tree-info" style="background-color: #ffebee; border-left-color: #f44336;">
                         <h3>Error Loading Tree {i}</h3>
                         <p style="color: #d32f2f;">Failed to generate HTML for this tree: {str(e)}</p>
@@ -312,9 +323,10 @@ class XGBTreeVisualizer:
         # Store variables that will be used in JavaScript
         num_trees = self.num_trees
         max_tree_index = self.num_trees - 1
+        instance_id = self.instance_id
         
-        # Use template from visualizer_templates.py
-        html_template = templates.get_tree_html_template(tree_selector, all_trees_html, num_trees, max_tree_index)
+        # Use template from visualizer_templates.py with instance ID
+        html_template = templates.get_tree_html_template(tree_selector, all_trees_html, num_trees, max_tree_index, instance_id)
         display(HTML(html_template))
 
     def _get_num_classes(self):
@@ -452,13 +464,132 @@ class XGBTreeVisualizer:
         
         return display_val, tooltip
 
-    def show_simplified_tree(self, max_depth=3):
+    def show_simplified_tree(self, max_depth=3, n_components=None, n_samples=10000):
         """
         Fit a simplified sklearn decision tree to the XGBoost model's predictions,
         then visualize it using the same format as the XGBoost trees.
         
+        Uses GMM-based sampling to create a synthetic dataset that better represents
+        the feature space, then queries the XGBoost model for predictions on this
+        synthetic data.
+        
         Parameters:
             max_depth (int): Maximum depth of the simplified tree (default: 3)
+            n_components (int, optional): Number of components for the GMM.
+                Defaults to number of classes for classification or 3 for regression.
+            n_samples (int): Number of samples to generate from the GMM (default: 10000)
+        """
+        if self.X is None or not isinstance(self.X, (np.ndarray, list)) or len(self.X) == 0:
+            raise ValueError("Input data X is required to fit a simplified tree")
+        
+        X_array = self._ensure_numpy_array(self.X)
+        
+        # Determine number of GMM components if not specified
+        if n_components is None:
+            if self.task_type == 'multiclass_classification' and self.num_classes > 0:
+                n_components = self.num_classes
+            elif self.task_type == 'binary_classification':
+                n_components = 2
+            else:  # regression or fallback
+                n_components = 3
+        
+        # 1. Fit a Gaussian Mixture Model to the input data
+        try:
+            from sklearn.mixture import GaussianMixture
+            gmm = GaussianMixture(n_components=n_components, 
+                                 covariance_type='full', 
+                                 random_state=42)
+            gmm.fit(X_array)
+            
+            # 2. Sample from the GMM to create synthetic dataset
+            X_synthetic, _ = gmm.sample(n_samples)
+            
+            # 3. Query the XGBoost model on these sampled points
+            # Get XGBoost model predictions on the synthetic data
+            try:
+                is_sklearn_api = False
+                
+                if hasattr(self.model, 'predict') and not hasattr(self.model, 'get_booster'):
+                    try:
+                        # Try sklearn API first with proper error handling
+                        y_synthetic = self.model.predict(X_synthetic)
+                        is_sklearn_api = True
+                    except (TypeError, ValueError):
+                        # If it fails, we'll try native XGBoost approach below
+                        pass
+                        
+                if not is_sklearn_api:
+                    # Try to import XGBoost for native API
+                    try:
+                        import xgboost as xgb
+                    
+                        if hasattr(self.model, 'get_booster'):
+                            xgb_model = self.model.get_booster()
+                        else:
+                            xgb_model = self.model
+                            
+                        dmatrix = xgb.DMatrix(X_synthetic, missing=np.nan)
+                        
+                        y_synthetic = xgb_model.predict(dmatrix)
+                        
+                    except ImportError:
+                        raise ValueError("XGBoost not found. Please install it to use this feature.")
+                    except Exception as e:
+                        raise ValueError(f"Failed to get predictions from XGBoost model: {str(e)}")
+            except Exception as e:
+                raise ValueError(f"Failed to get predictions from XGBoost model: {str(e)}")
+            
+            # 4. Train a simplified decision tree on the synthetic data
+            from sklearn.tree import DecisionTreeRegressor, DecisionTreeClassifier
+            
+            if self.task_type == 'regression':
+                simplified_model = DecisionTreeRegressor(max_depth=max_depth)
+                simplified_model.fit(X_synthetic, y_synthetic)
+            elif self.task_type == 'binary_classification':
+                simplified_model = DecisionTreeClassifier(max_depth=max_depth)
+                # For binary classification, y_pred might be probabilities
+                if len(y_synthetic.shape) > 1 and y_synthetic.shape[1] > 1:
+                    # If we have probability outputs, use the probability of class 1
+                    simplified_model.fit(X_synthetic, y_synthetic[:, 1] > 0.5)
+                else:
+                    simplified_model.fit(X_synthetic, y_synthetic)
+            else:  # multiclass_classification
+                simplified_model = DecisionTreeClassifier(max_depth=max_depth)
+                # For multiclass, y_pred might be probabilities or class indices
+                if len(y_synthetic.shape) > 1 and y_synthetic.shape[1] > 1:
+                    # If we have probability outputs, use the class with highest probability
+                    simplified_model.fit(X_synthetic, np.argmax(y_synthetic, axis=1))
+                else:
+                    simplified_model.fit(X_synthetic, y_synthetic)
+            
+            # Convert the sklearn tree to our visualization format
+            tree_dict = self._sklearn_tree_to_dict(simplified_model)
+            
+            # Generate HTML for the simplified tree
+            tree_html = self._generate_tree_html(tree_dict)
+            
+            # Create a header for the simplified tree with GMM information
+            tree_header = templates.get_simplified_tree_header_html(
+                max_depth=max_depth,
+                n_components=n_components,
+                n_samples=n_samples
+            )
+            
+            # Use template from visualizer_templates.py
+            html_template = templates.get_simplified_tree_html_template(tree_header, tree_html)
+            display(HTML(html_template))
+            
+        except ImportError:
+            print("Error: scikit-learn is required for Gaussian Mixture Model (GMM) sampling.")
+            print("Please install it with: pip install scikit-learn")
+            
+            # Fall back to the original implementation without GMM
+            self._show_simplified_tree_original(max_depth)
+    
+    def _show_simplified_tree_original(self, max_depth=3):
+        """
+        Original implementation of show_simplified_tree without GMM sampling.
+        Used as a fallback if sklearn is not available.
         """
         if self.X is None or not isinstance(self.X, (np.ndarray, list)) or len(self.X) == 0:
             raise ValueError("Input data X is required to fit a simplified tree")
@@ -532,7 +663,7 @@ class XGBTreeVisualizer:
         # Use template from visualizer_templates.py
         html_template = templates.get_simplified_tree_html_template(tree_header, tree_html)
         display(HTML(html_template))
-    
+
     def _sklearn_tree_to_dict(self, sklearn_tree):
         """
         Convert a scikit-learn decision tree to a dictionary format
