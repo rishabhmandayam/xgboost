@@ -4,7 +4,7 @@ from IPython.display import display, HTML
 # Add sklearn imports
 from sklearn.tree import DecisionTreeClassifier, DecisionTreeRegressor, _tree
 # Import HTML templates
-import visualizer_templates as templates
+from . import visualizer_templates as templates
 
 class XGBTreeVisualizer:
     _instance_counter = 0  # Class variable to track instances
