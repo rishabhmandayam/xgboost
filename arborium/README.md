@@ -104,7 +104,7 @@ Arborium offers the following key features:
 For interactive examples, explore our Jupyter notebooks:
 
 - [Basic Usage](https://github.com/rishabhmandayam/xgboost/blob/main/arborium/notebooks/01_basic_usage.ipynb) - Introduction to tree visualization
-- [Multiclass Classification](https://github.com/rishabhmandayam/xgboost/blob/main/arborium/notebooks/02_multiclass_classification.ipynb) - Visualizing trees in multiclass models
+- [Regression Example](https://github.com/rishabhmandayam/xgboost/blob/main/arborium/notebooks/02_regression_example.ipynb) - Visualizing trees in regression models
 - [Simplified Trees](https://github.com/rishabhmandayam/xgboost/blob/main/arborium/notebooks/03_simplified_trees.ipynb) - Creating and using simplified tree representations
 
 You can run these notebooks locally after installing arborium:
