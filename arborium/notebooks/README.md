@@ -33,9 +33,9 @@ To run these notebooks locally:
 
 You can also run these notebooks in Google Colab by clicking the "Open in Colab" badge in each notebook or by using the following links:
 
-- [01_basic_usage.ipynb in Colab](https://colab.research.google.com/github/yourusername/arborium/blob/main/notebooks/01_basic_usage.ipynb)
-- [02_multiclass_classification.ipynb in Colab](https://colab.research.google.com/github/yourusername/arborium/blob/main/notebooks/02_multiclass_classification.ipynb)
-- [03_simplified_trees.ipynb in Colab](https://colab.research.google.com/github/yourusername/arborium/blob/main/notebooks/03_simplified_trees.ipynb)
+- [01_basic_usage.ipynb in Colab](https://colab.research.google.com/github/rishabhmandayam/xgboost/blob/main/arborium/notebooks/01_basic_usage.ipynb)
+- [02_multiclass_classification.ipynb in Colab](https://colab.research.google.com/github/rishabhmandayam/xgboost/blob/main/arborium/notebooks/02_multiclass_classification.ipynb)
+- [03_simplified_trees.ipynb in Colab](https://colab.research.google.com/github/rishabhmandayam/xgboost/blob/main/arborium/notebooks/03_simplified_trees.ipynb)
 
 When running in Colab, make sure to uncomment and run the installation cell at the beginning of each notebook:
 

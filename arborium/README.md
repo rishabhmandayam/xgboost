@@ -103,22 +103,22 @@ Arborium offers the following key features:
 
 For interactive examples, explore our Jupyter notebooks:
 
-- [Basic Usage](https://github.com/yourusername/arborium/blob/main/notebooks/01_basic_usage.ipynb) - Introduction to tree visualization
-- [Multiclass Classification](https://github.com/yourusername/arborium/blob/main/notebooks/02_multiclass_classification.ipynb) - Visualizing trees in multiclass models
-- [Simplified Trees](https://github.com/yourusername/arborium/blob/main/notebooks/03_simplified_trees.ipynb) - Creating and using simplified tree representations
+- [Basic Usage](https://github.com/rishabhmandayam/xgboost/blob/main/arborium/notebooks/01_basic_usage.ipynb) - Introduction to tree visualization
+- [Multiclass Classification](https://github.com/rishabhmandayam/xgboost/blob/main/arborium/notebooks/02_multiclass_classification.ipynb) - Visualizing trees in multiclass models
+- [Simplified Trees](https://github.com/rishabhmandayam/xgboost/blob/main/arborium/notebooks/03_simplified_trees.ipynb) - Creating and using simplified tree representations
 
 You can run these notebooks locally after installing arborium:
 
 ```bash
-git clone https://github.com/yourusername/arborium.git
-cd arborium
+git clone https://github.com/rishabhmandayam/xgboost.git
+cd xgboost/arborium
 pip install -e .
 jupyter notebook notebooks/
 ```
 
 Or open directly in Google Colab:
 
-[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/yourusername/arborium/blob/main/notebooks/01_basic_usage.ipynb)
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/rishabhmandayam/xgboost/blob/main/arborium/notebooks/01_basic_usage.ipynb)
 
 ## Usage Examples
 
