@@ -7,5 +7,5 @@ easier to understand through advanced visualization techniques.
 
 from .visualizer import XGBTreeVisualizer
 
-__version__ = '0.1.4'
+__version__ = '0.1.5'
 __all__ = ['XGBTreeVisualizer'] 

@@ -5,7 +5,7 @@ with open("README.md", "r", encoding="utf-8") as fh:
 
 setup(
     name="arborium",
-    version="0.1.4",
+    version="0.1.5",
     author="Rishabh Mandayam",
     author_email="rishabh.mandayam@gmail.com",
     description="A tree visualization and analysis package for XGBoost models",
